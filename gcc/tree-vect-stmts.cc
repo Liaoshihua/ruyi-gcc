@@ -8680,10 +8680,24 @@ vectorizable_store (vec_info *vinfo,
 		      vec_oprnd = var;
 		    }
 
-		  signed char biasval =
-		    LOOP_VINFO_PARTIAL_LOAD_STORE_BIAS (loop_vinfo);
-
-		  tree bias = build_int_cst (intQI_type_node, biasval);
+		  if (partial_ifn == IFN_LEN_MASK_STORE)
+		    call = gimple_build_call_internal (IFN_LEN_MASK_STORE, 6,
+						       dataref_ptr, ptr,
+						       final_len, bias,
+						       final_mask, vec_oprnd);
+		  else
+		    call
+		      = gimple_build_call_internal (IFN_LEN_STORE, 5,
+						    dataref_ptr, ptr,
+						    final_len, bias,
+						    vec_oprnd);
+		  gimple_call_set_nothrow (call, true);
+		  vect_finish_stmt_generation (vinfo, stmt_info, call, gsi);
+		  new_stmt = call;
+		}
+	      else if (final_mask)
+		{
+		  tree ptr = build_int_cst (ref_type, align * BITS_PER_UNIT);
 		  gcall *call
 		    = gimple_build_call_internal (IFN_LEN_STORE, 5, dataref_ptr,
 						  ptr, final_len, vec_oprnd,
@@ -9996,7 +10010,98 @@ vectorizable_load (vec_info *vinfo,
 					      align, misalign);
 		    align = least_bit_hwi (misalign | align);
 
-		    if (final_mask)
+		    /* Compute IFN when LOOP_LENS or final_mask valid.  */
+		    machine_mode vmode = TYPE_MODE (vectype);
+		    machine_mode new_vmode = vmode;
+		    internal_fn partial_ifn = IFN_LAST;
+		    /* Produce 'len' and 'bias' argument.  */
+		    tree final_len = NULL_TREE;
+		    tree bias = NULL_TREE;
+		    if (loop_lens)
+		      {
+			opt_machine_mode new_ovmode
+			  = get_len_load_store_mode (vmode, true,
+						     &partial_ifn);
+			new_vmode = new_ovmode.require ();
+			unsigned factor = (new_ovmode == vmode)
+					    ? 1
+					    : GET_MODE_UNIT_SIZE (vmode);
+			final_len
+			  = vect_get_loop_len (loop_vinfo, gsi, loop_lens,
+					       vec_num * ncopies, vectype,
+					       vec_num * j + i, factor);
+		      }
+		    else if (final_mask)
+		      {
+			if (!can_vec_mask_load_store_p (
+			      vmode, TYPE_MODE (TREE_TYPE (final_mask)), true,
+			      &partial_ifn))
+			  gcc_unreachable ();
+		      }
+
+		    if (partial_ifn == IFN_LEN_MASK_LOAD)
+		      {
+			if (!final_len)
+			  {
+			    /* Pass VF value to 'len' argument of
+			       LEN_MASK_LOAD if LOOP_LENS is invalid.  */
+			    tree iv_type
+			      = LOOP_VINFO_RGROUP_IV_TYPE (loop_vinfo);
+			    final_len
+			      = build_int_cst (iv_type,
+					       TYPE_VECTOR_SUBPARTS (vectype));
+			  }
+			if (!final_mask)
+			  {
+			    /* Pass all ones value to 'mask' argument of
+			       LEN_MASK_LOAD if final_mask is invalid.  */
+			    mask_vectype = truth_type_for (vectype);
+			    final_mask = build_minus_one_cst (mask_vectype);
+			  }
+		      }
+		    if (final_len)
+		      {
+			signed char biasval
+			  = LOOP_VINFO_PARTIAL_LOAD_STORE_BIAS (loop_vinfo);
+
+			bias = build_int_cst (intQI_type_node, biasval);
+		      }
+
+		    if (final_len && memory_access_type != VMAT_INVARIANT)
+		      {
+			tree ptr
+			  = build_int_cst (ref_type, align * BITS_PER_UNIT);
+			gcall *call;
+			if (partial_ifn == IFN_LEN_MASK_LOAD)
+			  call = gimple_build_call_internal (IFN_LEN_MASK_LOAD,
+							     5, dataref_ptr,
+							     ptr, final_len,
+							     bias, final_mask);
+			else
+			  call = gimple_build_call_internal (IFN_LEN_LOAD, 4,
+							     dataref_ptr, ptr,
+							     final_len, bias);
+			gimple_call_set_nothrow (call, true);
+			new_stmt = call;
+			data_ref = NULL_TREE;
+
+			/* Need conversion if it's wrapped with VnQI.  */
+			if (vmode != new_vmode)
+			  {
+			    tree new_vtype = build_vector_type_for_mode (
+			      unsigned_intQI_type_node, new_vmode);
+			    tree var = vect_get_new_ssa_name (new_vtype,
+							      vect_simple_var);
+			    gimple_set_lhs (call, var);
+			    vect_finish_stmt_generation (vinfo, stmt_info, call,
+							 gsi);
+			    tree op = build1 (VIEW_CONVERT_EXPR, vectype, var);
+			    new_stmt
+			      = gimple_build_assign (vec_dest,
+						     VIEW_CONVERT_EXPR, op);
+			  }
+		      }
+		    else if (final_mask)
 		      {
 			tree ptr = build_int_cst (ref_type,
 						  align * BITS_PER_UNIT);
