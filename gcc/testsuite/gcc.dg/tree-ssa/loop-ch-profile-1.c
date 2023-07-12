@@ -7,4 +7,6 @@ void test(int v, int q)
 		foo ();
 }
 /* { dg-final { scan-tree-dump-not "Invalid sum" "ch2"} } */
-/* { dg-final { scan-tree-dump-not "Invalid sum" "optimized"} } */
+/* dom2 optimizes out the redundant test for loop invariant v/q
+   which leads to inconsistent profile.  */
+/* { dg-final { scan-tree-dump-not "Invalid sum" "optimized" } } */
