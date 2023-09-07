@@ -2154,6 +2154,53 @@ maybe_va_opt_error (cpp_reader *pfile)
     }
 }
 
+/* Helper function to perform diagnostics that are needed (rarely)
+   when an identifier is lexed.  */
+static void
+identifier_diagnostics_on_lex (cpp_reader *pfile, cpp_hashnode *node)
+{
+  if (__builtin_expect (!(node->flags & NODE_DIAGNOSTIC)
+			|| pfile->state.skipping, 1))
+    return;
+
+  /* It is allowed to poison the same identifier twice.  */
+  if ((node->flags & NODE_POISONED) && !pfile->state.poisoned_ok)
+    {
+      cpp_error (pfile, CPP_DL_ERROR, "attempt to use poisoned \"%s\"",
+		 NODE_NAME (node));
+      const auto data = (cpp_hashnode_extra *)
+	ht_lookup (pfile->extra_hash_table, node->ident, HT_NO_INSERT);
+      if (data && data->poisoned_loc)
+	cpp_error_at (pfile, CPP_DL_NOTE, data->poisoned_loc, "poisoned here");
+    }
+
+  /* Constraint 6.10.3.5: __VA_ARGS__ should only appear in the
+     replacement list of a variadic macro.  */
+  if (node == pfile->spec_nodes.n__VA_ARGS__
+      && !pfile->state.va_args_ok)
+    {
+      if (CPP_OPTION (pfile, cplusplus))
+	cpp_error (pfile, CPP_DL_PEDWARN,
+		   "__VA_ARGS__ can only appear in the expansion"
+		   " of a C++11 variadic macro");
+      else
+	cpp_error (pfile, CPP_DL_PEDWARN,
+		   "__VA_ARGS__ can only appear in the expansion"
+		   " of a C99 variadic macro");
+    }
+
+  /* __VA_OPT__ should only appear in the replacement list of a
+     variadic macro.  */
+  if (node == pfile->spec_nodes.n__VA_OPT__)
+    maybe_va_opt_error (pfile);
+
+  /* For -Wc++-compat, warn about use of C++ named operators.  */
+  if (node->flags & NODE_WARN_OPERATOR)
+    cpp_warning (pfile, CPP_W_CXX_OPERATOR_NAMES,
+		 "identifier \"%s\" is a special operator name in C++",
+		 NODE_NAME (node));
+}
+
 /* Helper function to get the cpp_hashnode of the identifier BASE.  */
 static cpp_hashnode *
 lex_identifier_intern (cpp_reader *pfile, const uchar *base)
