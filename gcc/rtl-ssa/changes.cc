@@ -394,14 +394,20 @@ move_insn (insn_change &change, insn_info *after)
   // At the moment we don't support moving instructions between EBBs,
   // but this would be worth adding if it's useful.
   insn_info *insn = change.insn ();
-  gcc_assert (after->ebb () == insn->ebb ());
+
   bb_info *bb = after->bb ();
   basic_block cfg_bb = bb->cfg_bb ();
 
-  if (insn->bb () != bb)
-    // Force DF to mark the old block as dirty.
-    df_insn_delete (rtl);
-  ::remove_insn (rtl);
+  if (!insn->is_temporary ())
+    {
+      gcc_assert (after->ebb () == insn->ebb ());
+
+      if (insn->bb () != bb)
+	// Force DF to mark the old block as dirty.
+	df_insn_delete (rtl);
+      ::remove_insn (rtl);
+    }
+
   ::add_insn_after (rtl, after_rtl, cfg_bb);
 }
 
@@ -437,6 +443,17 @@ function_info::finalize_new_accesses (insn_change &change, insn_info *pos)
       {
 	def_info *def = find_access (change.new_defs, ref.regno);
 	gcc_assert (def);
+
+	if (def->m_is_temp && is_a<set_info *> (def) && def->last_def ())
+	  {
+	    // For temporary sets being added with this change, we keep track of
+	    // the corresponding permanent def using the last_def link.
+	    //
+	    // So if we have one of these, follow it to get the permanent def.
+	    def = def->last_def ();
+	    gcc_assert (!def->m_is_temp && !def->m_has_been_superceded);
+	  }
+
 	if (def->m_is_temp)
 	  {
 	    if (is_a<clobber_info *> (def))
@@ -448,12 +465,6 @@ function_info::finalize_new_accesses (insn_change &change, insn_info *pos)
 		// later in case we see a second write to the same resource.
 		def_info *perm_def = allocate<set_info> (change.insn (),
 							 def->resource ());
-
-		// Keep track of the new set so we remember to add it to the
-		// def chain later.
-		if (new_sets.add (perm_def))
-		  gcc_unreachable (); // We shouldn't see duplicates here.
-
 		def->set_last_def (perm_def);
 		def = perm_def;
 	      }
@@ -665,6 +676,8 @@ function_info::apply_changes_to_insn (insn_change &change,
 
       insn->set_accesses (builder.finish ().begin (), num_defs, num_uses);
     }
+
+  insn->m_is_temp = false;
 }
 
 // Add a temporary placeholder instruction after AFTER.
@@ -697,7 +710,8 @@ function_info::change_insns (array_slice<insn_change *> changes)
       if (!change->is_deletion ())
 	{
 	  // Remove any notes that are no longer relevant.
-	  update_notes (change->rtl ());
+	  if (!change->insn ()->m_is_temp)
+	    update_notes (change->rtl ());
 
 	  // Make sure that the placement of this instruction would still
 	  // leave room for previous instructions.
@@ -706,6 +720,17 @@ function_info::change_insns (array_slice<insn_change *> changes)
 	    // verify_insn_changes is supposed to make sure that this holds.
 	    gcc_unreachable ();
 	  min_insn = later_insn (min_insn, change->move_range.first);
+
+	  if (change->insn ()->m_is_temp)
+	    {
+	      change->m_insn = allocate<insn_info> (change->insn ()->bb (),
+						    change->rtl (),
+						    change->insn_uid ());
+
+	      // Set the flag again so subsequent logic is aware.
+	      // It will be cleared later on.
+	      change->m_insn->m_is_temp = true;
+	    }
 	}
     }
 
@@ -825,7 +850,8 @@ function_info::change_insns (array_slice<insn_change *> changes)
 	      // Remove the placeholder first so that we have a wider range of
 	      // program points when inserting INSN.
 	      insn_info *after = placeholder->prev_any_insn ();
-	      remove_insn (insn);
+	      if (!insn->is_temporary ())
+		remove_insn (insn);
 	      remove_insn (placeholder);
 	      insn->set_bb (after->bb ());
 	      add_insn_after (insn, after);
@@ -1146,6 +1172,28 @@ function_info::perform_pending_updates ()
     }
 
   return changed_cfg;
+}
+
+insn_info *
+function_info::create_insn (obstack_watermark &watermark,
+			    rtx_code insn_code,
+			    rtx pat)
+{
+  rtx_insn *rti = nullptr;
+
+  // TODO: extend, move in to emit-rtl.cc.
+  switch (insn_code)
+    {
+    case INSN:
+      rti = make_insn_raw (pat);
+      break;
+    default:
+      gcc_unreachable ();
+    }
+
+  auto insn = change_alloc<insn_info> (watermark, nullptr, rti, INSN_UID (rti));
+  insn->m_is_temp = true;
+  return insn;
 }
 
 // Print a description of CHANGE to PP.
