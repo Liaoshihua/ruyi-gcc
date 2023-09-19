@@ -13,6 +13,7 @@ template <int N>
 void qux ()
 {
   int a = bar (N);	// { dg-message "in 'constexpr' expansion of 'bar\\(2\\)'" }
+// { dg-error "call to consteval function" "" { target *-*-* } .-1 }
 }
 
 // This function is not instantiated so NDR.
@@ -30,3 +31,4 @@ baz ()
 }
 
 int a = bar (2);	// { dg-message "in 'constexpr' expansion of 'bar\\(2\\)'" }
+// { dg-error "call to consteval function" "" { target *-*-* } .-1 }
