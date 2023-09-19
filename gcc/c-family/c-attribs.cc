@@ -151,6 +151,7 @@ static tree handle_alloc_align_attribute (tree *, tree, tree, int, bool *);
 static tree handle_assume_aligned_attribute (tree *, tree, tree, int, bool *);
 static tree handle_assume_attribute (tree *, tree, tree, int, bool *);
 static tree handle_target_attribute (tree *, tree, tree, int, bool *);
+static tree handle_target_version_attribute (tree *, tree, tree, int, bool *);
 static tree handle_target_clones_attribute (tree *, tree, tree, int, bool *);
 static tree handle_optimize_attribute (tree *, tree, tree, int, bool *);
 static tree ignore_attribute (tree *, tree, tree, int, bool *);
@@ -220,6 +221,28 @@ static const struct attribute_spec::exclusions attr_noinline_exclusions[] =
 {
   ATTR_EXCL ("always_inline", true, true, true),
   ATTR_EXCL ("gnu_inline", true, true, true),
+  ATTR_EXCL (NULL, false, false, false),
+};
+
+static const struct attribute_spec::exclusions attr_target_exclusions[] =
+{
+  ATTR_EXCL ("target_clones", TARGET_HAS_FMV_TARGET_ATTRIBUTE,
+	     TARGET_HAS_FMV_TARGET_ATTRIBUTE, TARGET_HAS_FMV_TARGET_ATTRIBUTE),
+  ATTR_EXCL (NULL, false, false, false),
+};
+
+static const struct attribute_spec::exclusions attr_target_clones_exclusions[] =
+{
+  ATTR_EXCL ("always_inline", true, true, true),
+  ATTR_EXCL ("target", TARGET_HAS_FMV_TARGET_ATTRIBUTE,
+	     TARGET_HAS_FMV_TARGET_ATTRIBUTE, TARGET_HAS_FMV_TARGET_ATTRIBUTE),
+  ATTR_EXCL ("target_version", true, true, true),
+  ATTR_EXCL (NULL, false, false, false),
+};
+
+static const struct attribute_spec::exclusions attr_target_version_exclusions[] =
+{
+  ATTR_EXCL ("target_clones", true, true, true),
   ATTR_EXCL (NULL, false, false, false),
 };
 
@@ -487,7 +510,11 @@ const struct attribute_spec c_common_gnu_attributes[] =
   { "error",		      1, 1, true,  false, false, false,
 			      handle_error_attribute, NULL },
   { "target",                 1, -1, true, false, false, false,
-			      handle_target_attribute, NULL },
+			      handle_target_attribute,
+			      attr_target_exclusions },
+  { "target_version",         1, 1, true, false, false, false,
+			      handle_target_version_attribute,
+			      attr_target_version_exclusions },
   { "target_clones",          1, -1, true, false, false, false,
 			      handle_target_clones_attribute, NULL },
   { "optimize",               1, -1, true, false, false, false,
@@ -5713,7 +5740,7 @@ static tree
 handle_target_attribute (tree *node, tree name, tree args, int flags,
 			 bool *no_add_attrs)
 {
-  /* Ensure we have a function type.  */
+  /* Ensure we have a function declaration.  */
   if (TREE_CODE (*node) != FUNCTION_DECL)
     {
       warning (OPT_Wattributes, "%qE attribute ignored", name);
@@ -5745,13 +5772,32 @@ handle_target_attribute (tree *node, tree name, tree args, int flags,
   return NULL_TREE;
 }
 
+/* Handle a "target_version" attribute.  */
+
+static tree
+handle_target_version_attribute (tree *node, tree name, tree args, int flags,
+				  bool *no_add_attrs)
+{
+  /* Ensure we have a function declaration.  */
+  if (TREE_CODE (*node) != FUNCTION_DECL)
+    {
+      warning (OPT_Wattributes, "%qE attribute ignored", name);
+      *no_add_attrs = true;
+    }
+  else if (!targetm.target_option.valid_version_attribute_p (*node, name, args,
+							     flags))
+    *no_add_attrs = true;
+
+  return NULL_TREE;
+}
+
 /* Handle a "target_clones" attribute.  */
 
 static tree
 handle_target_clones_attribute (tree *node, tree name, tree ARG_UNUSED (args),
 			  int ARG_UNUSED (flags), bool *no_add_attrs)
 {
-  /* Ensure we have a function type.  */
+  /* Ensure we have a function declaration.  */
   if (TREE_CODE (*node) == FUNCTION_DECL)
     {
       for (tree t = args; t != NULL_TREE; t = TREE_CHAIN (t))

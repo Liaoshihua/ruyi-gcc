@@ -130,6 +130,34 @@ static const struct attribute_spec::exclusions attr_stack_protect_exclusions[] =
   { NULL, false, false, false },
 };
 
+static const struct attribute_spec::exclusions attr_always_inline_exclusions[] =
+{
+  { "noinline", true, true, true },
+  { "target_clones", true, true, true },
+  { NULL, false, false, false },
+};
+
+static const struct attribute_spec::exclusions attr_noinline_exclusions[] =
+{
+  { "always_inline", true, true, true },
+  { NULL, false, false, false },
+};
+
+static const struct attribute_spec::exclusions attr_target_exclusions[] =
+{
+  { "target_clones", TARGET_HAS_FMV_TARGET_ATTRIBUTE,
+    TARGET_HAS_FMV_TARGET_ATTRIBUTE, TARGET_HAS_FMV_TARGET_ATTRIBUTE },
+  { NULL, false, false, false },
+};
+
+static const struct attribute_spec::exclusions attr_target_clones_exclusions[] =
+{
+  { "always_inline", true, true, true },
+  { "target", TARGET_HAS_FMV_TARGET_ATTRIBUTE, TARGET_HAS_FMV_TARGET_ATTRIBUTE,
+    TARGET_HAS_FMV_TARGET_ATTRIBUTE },
+  { NULL, false, false, false },
+};
+
 /* Fake handler for attributes we don't properly support, typically because
    they'd require dragging a lot of the common-c front-end circuitry.  */
 static tree fake_attribute_handler (tree *, tree, tree, int, bool *);
