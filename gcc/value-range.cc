@@ -232,6 +232,96 @@ vrange::dump (FILE *file) const
   pp_flush (&buffer);
 }
 
+void
+irange_bitmask::dump (FILE *file) const
+{
+  char buf[WIDE_INT_PRINT_BUFFER_SIZE], *p;
+  pretty_printer buffer;
+
+  pp_needs_newline (&buffer) = true;
+  buffer.buffer->stream = file;
+  pp_string (&buffer, "MASK ");
+  unsigned len_mask = m_mask.get_len ();
+  unsigned len_val = m_value.get_len ();
+  unsigned len = MAX (len_mask, len_val);
+  if (len > WIDE_INT_MAX_INL_ELTS)
+    p = XALLOCAVEC (char, len * HOST_BITS_PER_WIDE_INT / 4 + 4);
+  else
+    p = buf;
+  print_hex (m_mask, p);
+  pp_string (&buffer, p);
+  pp_string (&buffer, " VALUE ");
+  print_hex (m_value, p);
+  pp_string (&buffer, p);
+  pp_flush (&buffer);
+}
+
+namespace inchash
+{
+
+void
+add_vrange (const vrange &v, inchash::hash &hstate,
+	     unsigned int)
+{
+  if (v.undefined_p ())
+    {
+      hstate.add_int (VR_UNDEFINED);
+      return;
+    }
+  // Types are ignored throughout to inhibit two ranges being equal
+  // but having different hash values.  This can happen when two
+  // ranges are equal and their types are different (but
+  // types_compatible_p is true).
+  if (is_a <irange> (v))
+    {
+      const irange &r = as_a <irange> (v);
+      if (r.varying_p ())
+	hstate.add_int (VR_VARYING);
+      else
+	hstate.add_int (VR_RANGE);
+      for (unsigned i = 0; i < r.num_pairs (); ++i)
+	{
+	  hstate.add_wide_int (r.lower_bound (i));
+	  hstate.add_wide_int (r.upper_bound (i));
+	}
+      irange_bitmask bm = r.get_bitmask ();
+      hstate.add_wide_int (bm.value ());
+      hstate.add_wide_int (bm.mask ());
+      return;
+    }
+  if (is_a <frange> (v))
+    {
+      const frange &r = as_a <frange> (v);
+      if (r.known_isnan ())
+	hstate.add_int (VR_NAN);
+      else
+	{
+	  hstate.add_int (r.varying_p () ? VR_VARYING : VR_RANGE);
+	  hstate.add_real_value (r.lower_bound ());
+	  hstate.add_real_value (r.upper_bound ());
+	}
+      nan_state nan = r.get_nan_state ();
+      hstate.add_int (nan.pos_p ());
+      hstate.add_int (nan.neg_p ());
+      return;
+    }
+  gcc_unreachable ();
+}
+
+} //namespace inchash
+
+bool
+irange::nonnegative_p () const
+{
+  return wi::ge_p (lower_bound (), 0, TYPE_SIGN (type ()));
+}
+
+bool
+irange::nonpositive_p () const
+{
+  return wi::le_p (upper_bound (), 0, TYPE_SIGN (type ()));
+}
+
 bool
 irange::supports_type_p (const_tree type) const
 {
