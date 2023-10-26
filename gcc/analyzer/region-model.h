@@ -27,6 +27,8 @@ along with GCC; see the file COPYING3.  If not see
      http://lcs.ios.ac.cn/~xuzb/canalyze/memmodel.pdf  */
 
 #include "bitmap.h"
+#include "stringpool.h"
+#include "attribs.h" // for rdwr_map
 #include "selftest.h"
 #include "analyzer/svalue.h"
 #include "analyzer/region.h"
@@ -492,6 +494,35 @@ class region_model
   void check_region_for_write (const region *dest_reg,
 			       region_model_context *ctxt) const;
 
+  const svalue *
+  check_for_null_terminated_string_arg (const call_details &cd,
+					unsigned idx) const;
+  const svalue *
+  check_for_null_terminated_string_arg (const call_details &cd,
+					unsigned idx,
+					bool include_terminator,
+					const svalue **out_sval) const;
+
+  const builtin_known_function *
+  get_builtin_kf (const gcall *call,
+		  region_model_context *ctxt = NULL) const;
+
+  static void
+  register_pop_frame_callback (const pop_frame_callback &callback)
+  {
+    pop_frame_callbacks.safe_push (callback);
+  }
+
+  static void
+  notify_on_pop_frame (const region_model *model,
+		       const region_model *prev_model,
+		       const svalue *retval,
+		       region_model_context *ctxt)
+  {
+    for (auto &callback : pop_frame_callbacks)
+	callback (model, prev_model, retval, ctxt);
+  }
+
 private:
   const region *get_lvalue_1 (path_var pv, region_model_context *ctxt) const;
   const svalue *get_rvalue_1 (path_var pv, region_model_context *ctxt) const;
@@ -572,9 +603,24 @@ private:
 			    region_model_context *ctxt) const;
 
   void check_call_args (const call_details &cd) const;
-  void check_external_function_for_access_attr (const gcall *call,
-						tree callee_fndecl,
-						region_model_context *ctxt) const;
+  void check_call_format_attr (const call_details &cd,
+			       tree format_attr) const;
+  void check_function_attr_access (const gcall *call,
+				   tree callee_fndecl,
+				   region_model_context *ctxt,
+				   rdwr_map &rdwr_idx) const;
+  void check_function_attr_null_terminated_string_arg (const gcall *call,
+						       tree callee_fndecl,
+						       region_model_context *ctxt,
+						       rdwr_map &rdwr_idx);
+  void check_one_function_attr_null_terminated_string_arg (const gcall *call,
+							   tree callee_fndecl,
+							   region_model_context *ctxt,
+							   rdwr_map &rdwr_idx,
+							   tree attr);
+  void check_function_attrs (const gcall *call,
+			     tree callee_fndecl,
+			     region_model_context *ctxt);
 
   /* Storing this here to avoid passing it around everywhere.  */
   region_model_manager *const m_mgr;
