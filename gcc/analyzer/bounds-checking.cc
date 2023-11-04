@@ -113,6 +113,45 @@ protected:
 	    m_diag_arg, min_idx, max_idx);
   }
 
+  void
+  maybe_show_diagram (logger *logger) const
+  {
+    access_operation op (m_model, get_dir (), *m_reg, m_sval_hint);
+
+    /* Don't attempt to make a diagram if there's no valid way of
+       accessing the base region (e.g. a 0-element array).  */
+    if (op.get_valid_bits ().empty_p ())
+      return;
+
+    if (const text_art::theme *theme = global_dc->get_diagram_theme ())
+      {
+	text_art::style_manager sm;
+	text_art::canvas canvas (make_access_diagram (op, sm, *theme, logger));
+	if (canvas.get_size ().w == 0 && canvas.get_size ().h == 0)
+	  {
+	    /* In lieu of exceptions, return a zero-sized diagram if there's
+	       a problem.  Give up if that's happened.  */
+	    return;
+	  }
+	diagnostic_diagram diagram
+	  (canvas,
+	   /* Alt text.  */
+	   _("Diagram visualizing the predicted out-of-bounds access"));
+	global_dc->emit_diagram (diagram);
+      }
+  }
+
+  text_art::canvas
+  make_access_diagram (const access_operation &op,
+		       text_art::style_manager &sm,
+		       const text_art::theme &theme,
+		       logger *logger) const
+  {
+    access_diagram d (op, m_region_creation_event_id, sm, theme, logger);
+    return d.to_canvas (sm);
+  }
+
+  region_model m_model;
   const region *m_reg;
   tree m_diag_arg;
 };
