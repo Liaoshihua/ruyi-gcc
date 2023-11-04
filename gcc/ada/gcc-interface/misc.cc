@@ -334,9 +334,16 @@ internal_error_function (diagnostic_context *context, const char *msgid,
   if (context->show_column && xloc.column != 0)
     loc = xasprintf ("%s:%d:%d", xloc.file, xloc.line, xloc.column);
   else
-    loc = xasprintf ("%s:%d", xloc.file, xloc.line);
-  temp_loc.Low_Bound = 1;
-  temp_loc.High_Bound = strlen (loc);
+    {
+      xloc = expand_location (input_location);
+      if (context->m_show_column && xloc.column != 0)
+	loc = xasprintf ("%s:%d:%d", xloc.file, xloc.line, xloc.column);
+      else
+	loc = xasprintf ("%s:%d", xloc.file, xloc.line);
+      temp_loc.Low_Bound = 1;
+      temp_loc.High_Bound = strlen (loc);
+    }
+
   sp_loc.Bounds = &temp_loc;
   sp_loc.Array = loc;
 
@@ -368,7 +375,7 @@ gnat_init (void)
   line_table->default_range_bits = 0;
 
   /* Register our internal error function.  */
-  global_dc->internal_error = &internal_error_function;
+  global_dc->m_internal_error = &internal_error_function;
 
   return true;
 }
