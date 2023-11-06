@@ -9352,8 +9352,29 @@ have to optimize it to just @code{return 42 + 42;}.
 @section Attribute Syntax
 @cindex attribute syntax
 
-This section describes the syntax with which @code{__attribute__} may be
-used, and the constructs to which attribute specifiers bind, for the C
+GCC provides two different ways to specify attributes: the standard C
+and C++ syntax using double square brackets, and the older GNU
+extension syntax using the @code{@w{__attribute__}} keyword, which predates
+the adoption of the standard syntax and is still widely used in older
+code.
+
+The standard @samp{[[]]} attribute syntax is recognized by GCC's
+default language dialect for both C and C++.  More specifically, this
+syntax was first introduced in the C++11 language standard
+(@pxref{Standards}), and is supported by GCC in C++ code with
+@option{-std=c++11} or @option{-std=gnu++11} or later.  It is also
+part of the C23 language standard and is supported when compiling C
+code with @option{-std=c23} or @option{-std=gnu17} or later.
+
+When using GNU-specific attributes in the standard syntax, you must
+prefix their names with @samp{gnu::}, such as @code{gnu::section}.
+Refer to the relevant language standards for exact details on the
+placement of @samp{[[]]} attributes within your code, as they differ
+in some details from the rules for the GNU attribute syntax.
+
+The remainder of this section describes the details of the GNU extension
+@code{__attribute__} syntax,
+and the constructs to which attribute specifiers bind, for the C
 language.  Some details may vary for C++ and Objective-C@.  Because of
 limitations in the grammar for attributes, some forms described here
 may not be successfully parsed in all cases.
