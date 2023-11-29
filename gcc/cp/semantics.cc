@@ -11523,6 +11523,7 @@ finish_static_assert (tree condition, tree message, location_t location,
 			  error_at (location,
 				    "%<static_assert%> message %<data()[%d]%> "
 				    "must be a constant expression", i);
+			  XDELETEVEC (buf);
 			  return;
 			}
 		      if (msg == NULL)
