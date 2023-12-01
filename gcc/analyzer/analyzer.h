@@ -93,6 +93,7 @@ class bounded_ranges_manager;
 
 class pending_diagnostic;
 class pending_note;
+class saved_diagnostic;
 struct event_loc_info;
 class checker_event;
   class state_change_event;
