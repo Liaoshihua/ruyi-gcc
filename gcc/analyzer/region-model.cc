@@ -39,7 +39,6 @@ along with GCC; see the file COPYING3.  If not see
 #include "fold-const.h"
 #include "tree-pretty-print.h"
 #include "diagnostic-color.h"
-#include "diagnostic-metadata.h"
 #include "bitmap.h"
 #include "selftest.h"
 #include "analyzer/analyzer.h"
@@ -77,6 +76,8 @@ along with GCC; see the file COPYING3.  If not see
 #include "analyzer/checker-event.h"
 #include "analyzer/checker-path.h"
 #include "analyzer/feasible-graph.h"
+#include "analyzer/record-layout.h"
+#include "diagnostic-format-sarif.h"
 
 #if ENABLE_ANALYZER
 
@@ -507,7 +508,7 @@ public:
 
   bool terminate_path_p () const final override { return true; }
 
-  bool emit (rich_location *rich_loc) final override
+  bool emit (diagnostic_emission_context &ctxt) final override
   {
     switch (m_pkind)
       {
@@ -515,28 +516,30 @@ public:
 	gcc_unreachable ();
       case POISON_KIND_UNINIT:
 	{
-	  diagnostic_metadata m;
-	  m.add_cwe (457); /* "CWE-457: Use of Uninitialized Variable".  */
-	  return warning_meta (rich_loc, m, get_controlling_option (),
-			       "use of uninitialized value %qE",
-			       m_expr);
+	  ctxt.add_cwe (457); /* "CWE-457: Use of Uninitialized Variable".  */
+	  return ctxt.warn ("use of uninitialized value %qE",
+			    m_expr);
 	}
 	break;
       case POISON_KIND_FREED:
 	{
-	  diagnostic_metadata m;
-	  m.add_cwe (416); /* "CWE-416: Use After Free".  */
-	  return warning_meta (rich_loc, m, get_controlling_option (),
-			       "use after %<free%> of %qE",
-			       m_expr);
+	  ctxt.add_cwe (416); /* "CWE-416: Use After Free".  */
+	  return ctxt.warn ("use after %<free%> of %qE",
+			    m_expr);
+	}
+	break;
+      case POISON_KIND_DELETED:
+	{
+	  ctxt.add_cwe (416); /* "CWE-416: Use After Free".  */
+	  return ctxt.warn ("use after %<delete%> of %qE",
+			    m_expr);
 	}
 	break;
       case POISON_KIND_POPPED_STACK:
 	{
 	  /* TODO: which CWE?  */
-	  return warning_at
-	    (rich_loc, get_controlling_option (),
-	     "dereferencing pointer %qE to within stale stack frame",
+	  return ctxt.warn
+	    ("dereferencing pointer %qE to within stale stack frame",
 	     m_expr);
 	}
 	break;
@@ -638,10 +641,9 @@ public:
     return OPT_Wanalyzer_shift_count_negative;
   }
 
-  bool emit (rich_location *rich_loc) final override
+  bool emit (diagnostic_emission_context &ctxt) final override
   {
-    return warning_at (rich_loc, get_controlling_option (),
-		       "shift by negative count (%qE)", m_count_cst);
+    return ctxt.warn ("shift by negative count (%qE)", m_count_cst);
   }
 
   label_text describe_final_event (const evdesc::final_event &ev) final override
@@ -685,11 +687,10 @@ public:
     return OPT_Wanalyzer_shift_count_overflow;
   }
 
-  bool emit (rich_location *rich_loc) final override
+  bool emit (diagnostic_emission_context &ctxt) final override
   {
-    return warning_at (rich_loc, get_controlling_option (),
-		       "shift by count (%qE) >= precision of type (%qi)",
-		       m_count_cst, m_operand_precision);
+    return ctxt.warn ("shift by count (%qE) >= precision of type (%qi)",
+		      m_count_cst, m_operand_precision);
   }
 
   label_text describe_final_event (const evdesc::final_event &ev) final override
@@ -2734,23 +2735,20 @@ public:
     return OPT_Wanalyzer_write_to_const;
   }
 
-  bool emit (rich_location *rich_loc) final override
+  bool emit (diagnostic_emission_context &ctxt) final override
   {
     auto_diagnostic_group d;
     bool warned;
     switch (m_reg->get_kind ())
       {
       default:
-	warned = warning_at (rich_loc, get_controlling_option (),
-			     "write to %<const%> object %qE", m_decl);
+	warned = ctxt.warn ("write to %<const%> object %qE", m_decl);
 	break;
       case RK_FUNCTION:
-	warned = warning_at (rich_loc, get_controlling_option (),
-			     "write to function %qE", m_decl);
+	warned = ctxt.warn ("write to function %qE", m_decl);
 	break;
       case RK_LABEL:
-	warned = warning_at (rich_loc, get_controlling_option (),
-			     "write to label %qE", m_decl);
+	warned = ctxt.warn ("write to label %qE", m_decl);
 	break;
       }
     if (warned)
@@ -2802,10 +2800,9 @@ public:
     return OPT_Wanalyzer_write_to_string_literal;
   }
 
-  bool emit (rich_location *rich_loc) final override
+  bool emit (diagnostic_emission_context &ctxt) final override
   {
-    return warning_at (rich_loc, get_controlling_option (),
-		       "write to string literal");
+    return ctxt.warn ("write to string literal");
     /* Ideally we would show the location of the STRING_CST as well,
        but it is not available at this point.  */
   }
@@ -3016,14 +3013,12 @@ public:
     return OPT_Wanalyzer_allocation_size;
   }
 
-  bool emit (rich_location *rich_loc) final override
+  bool emit (diagnostic_emission_context &ctxt) final override
   {
-    diagnostic_metadata m;
-    m.add_cwe (131);
+    ctxt.add_cwe (131);
 
-    return warning_meta (rich_loc, m, get_controlling_option (),
-			 "allocated buffer size is not a multiple"
-			 " of the pointee's size");
+    return ctxt.warn ("allocated buffer size is not a multiple"
+		      " of the pointee's size");
   }
 
   label_text describe_final_event (const evdesc::final_event &ev) final
@@ -5715,15 +5710,14 @@ public:
     return same_tree_p (m_arg, ((const float_as_size_arg &) other).m_arg);
   }
 
-  bool emit (rich_location *rich_loc) final override
+  bool emit (diagnostic_emission_context &ctxt) final override
   {
-    diagnostic_metadata m;
-    bool warned = warning_meta (rich_loc, m, get_controlling_option (),
-				"use of floating-point arithmetic here might"
-				" yield unexpected results");
+    bool warned = ctxt.warn ("use of floating-point arithmetic here might"
+			     " yield unexpected results");
     if (warned)
-      inform (rich_loc->get_loc (), "only use operands of an integer type"
-				    " inside the size argument");
+      inform (ctxt.get_location (),
+	      "only use operands of an integer type"
+	      " inside the size argument");
     return warned;
   }
 
@@ -6077,37 +6071,33 @@ public:
     return OPT_Wanalyzer_exposure_through_uninit_copy;
   }
 
-  bool emit (rich_location *rich_loc) final override
+  bool emit (diagnostic_emission_context &ctxt) final override
   {
-    diagnostic_metadata m;
     /* CWE-200: Exposure of Sensitive Information to an Unauthorized Actor.  */
-    m.add_cwe (200);
+    ctxt.add_cwe (200);
     enum memory_space mem_space = get_src_memory_space ();
     bool warned;
     switch (mem_space)
       {
       default:
-	warned = warning_meta
-	  (rich_loc, m, get_controlling_option (),
-	   "potential exposure of sensitive information"
-	   " by copying uninitialized data across trust boundary");
+	warned = ctxt.warn ("potential exposure of sensitive information"
+			    " by copying uninitialized data"
+			    " across trust boundary");
 	break;
       case MEMSPACE_STACK:
-	warned = warning_meta
-	  (rich_loc, m, get_controlling_option (),
-	   "potential exposure of sensitive information"
-	   " by copying uninitialized data from stack across trust boundary");
+	warned = ctxt.warn ("potential exposure of sensitive information"
+			    " by copying uninitialized data from stack"
+			    " across trust boundary");
 	break;
       case MEMSPACE_HEAP:
-	warned = warning_meta
-	  (rich_loc, m, get_controlling_option (),
-	   "potential exposure of sensitive information"
-	   " by copying uninitialized data from heap across trust boundary");
+	warned = ctxt.warn ("potential exposure of sensitive information"
+			    " by copying uninitialized data from heap"
+			    " across trust boundary");
 	break;
       }
     if (warned)
       {
-	location_t loc = rich_loc->get_loc ();
+	const location_t loc = ctxt.get_location ();
 	inform_number_of_uninit_bits (loc);
 	complain_about_uninit_ranges (loc);
 
@@ -6137,6 +6127,17 @@ public:
   {
     if (m_src_region)
       interest->add_region_creation (m_src_region);
+  }
+
+  void
+  maybe_add_sarif_properties (sarif_object &result_obj) const final override
+  {
+    sarif_property_bag &props = result_obj.get_or_create_properties ();
+#define PROPERTY_PREFIX "gcc/-Wanalyzer-exposure-through-uninit-copy/"
+    props.set (PROPERTY_PREFIX "src_region", m_src_region->to_json ());
+    props.set (PROPERTY_PREFIX "dest_region", m_dest_region->to_json ());
+    props.set (PROPERTY_PREFIX "copied_sval", m_copied_sval->to_json ());
+#undef PROPERTY_PREFIX
   }
 
 private:
