@@ -4583,8 +4583,8 @@ handle_std_noreturn_attribute (tree *node, tree name, tree args,
     }
 }
 
-/* Table of supported standard (C2x) attributes.  */
-const struct attribute_spec std_attribute_table[] =
+/* Table of supported standard (C23) attributes.  */
+static const attribute_spec std_attributes[] =
 {
   /* { name, min_len, max_len, decl_req, type_req, fn_type_req,
        affects_type_identity, handler, exclude } */
@@ -4599,8 +4599,12 @@ const struct attribute_spec std_attribute_table[] =
   { "nodiscard", 0, 1, false, false, false, false,
     handle_nodiscard_attribute, NULL },
   { "noreturn", 0, 0, false, false, false, false,
-    handle_std_noreturn_attribute, NULL },
-  { NULL, 0, 0, false, false, false, false, NULL, NULL }
+    handle_std_noreturn_attribute, NULL }
+};
+
+const scoped_attribute_specs std_attribute_table =
+{
+  nullptr, std_attributes
 };
 
 /* Create the predefined scalar types of C,
@@ -4615,8 +4619,6 @@ c_init_decl_processing (void)
 
   /* Initialize reserved words for parser.  */
   c_parse_init ();
-
-  register_scoped_attributes (std_attribute_table, NULL);
 
   current_function_decl = NULL_TREE;
 
