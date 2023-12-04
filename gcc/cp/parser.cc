@@ -2341,15 +2341,15 @@ static tree cp_parser_selection_statement
 static tree cp_parser_condition
   (cp_parser *);
 static tree cp_parser_iteration_statement
-  (cp_parser *, bool *, bool, unsigned short, bool);
+  (cp_parser *, bool *, bool, tree, bool);
 static bool cp_parser_init_statement
   (cp_parser *, tree *decl);
 static tree cp_parser_for
-  (cp_parser *, bool, unsigned short, bool);
+  (cp_parser *, bool, tree, bool);
 static tree cp_parser_c_for
-  (cp_parser *, tree, tree, bool, unsigned short, bool);
+  (cp_parser *, tree, tree, bool, tree, bool);
 static tree cp_parser_range_for
-  (cp_parser *, tree, tree, tree, bool, unsigned short, bool, bool);
+  (cp_parser *, tree, tree, tree, bool, tree, bool, bool);
 static void do_range_for_auto_deduction
   (tree, tree, cp_decomp *);
 static tree cp_parser_perform_range_for_lookup
@@ -12463,8 +12463,8 @@ cp_parser_statement (cp_parser* parser, tree in_statement_expr,
 	case RID_DO:
 	case RID_FOR:
 	  std_attrs = process_stmt_hotness_attribute (std_attrs, attrs_loc);
-	  statement = cp_parser_iteration_statement (parser, if_p, false, 0,
-						     false);
+	  statement = cp_parser_iteration_statement (parser, if_p, false,
+						     NULL_TREE, false);
 	  break;
 
 	case RID_BREAK:
@@ -13644,8 +13644,7 @@ cp_parser_condition (cp_parser* parser)
    not included. */
 
 static tree
-cp_parser_for (cp_parser *parser, bool ivdep, unsigned short unroll,
-	       bool novector)
+cp_parser_for (cp_parser *parser, bool ivdep, tree unroll, bool novector)
 {
   tree init, scope, decl;
   bool is_range_for;
@@ -13682,7 +13681,7 @@ cp_parser_for (cp_parser *parser, bool ivdep, unsigned short unroll,
 
 static tree
 cp_parser_c_for (cp_parser *parser, tree scope, tree init, bool ivdep,
-		 unsigned short unroll, bool novector)
+		 tree unroll, bool novector)
 {
   /* Normal for loop */
   tree condition = NULL_TREE;
@@ -13733,8 +13732,7 @@ cp_parser_c_for (cp_parser *parser, tree scope, tree init, bool ivdep,
 
 static tree
 cp_parser_range_for (cp_parser *parser, tree scope, tree init, tree range_decl,
-		     bool ivdep, unsigned short unroll, bool novector,
-		     bool is_omp)
+		     bool ivdep, tree unroll, bool novector, bool is_omp)
 {
   tree stmt, range_expr;
   auto_vec <cxx_binding *, 16> bindings;
@@ -13807,7 +13805,7 @@ cp_parser_range_for (cp_parser *parser, tree scope, tree init, tree range_decl,
       if (ivdep)
 	RANGE_FOR_IVDEP (stmt) = 1;
       if (unroll)
-	RANGE_FOR_UNROLL (stmt) = build_int_cst (integer_type_node, unroll);
+	RANGE_FOR_UNROLL (stmt) = unroll;
       if (novector)
 	RANGE_FOR_NOVECTOR (stmt) = 1;
       finish_range_for_decl (stmt, range_decl, range_expr);
@@ -13996,7 +13994,7 @@ warn_for_range_copy (tree decl, tree expr)
 
 tree
 cp_convert_range_for (tree statement, tree range_decl, tree range_expr,
-		      cp_decomp *decomp, bool ivdep, unsigned short unroll,
+		      cp_decomp *decomp, bool ivdep, tree unroll,
 		      bool novector)
 {
   tree begin, end;
@@ -14221,7 +14219,7 @@ cp_parser_range_for_member_function (tree range, tree identifier)
 
 static tree
 cp_parser_iteration_statement (cp_parser* parser, bool *if_p, bool ivdep,
-			       unsigned short unroll, bool novector)
+			       tree unroll, bool novector)
 {
   cp_token *token;
   enum rid keyword;
@@ -43751,6 +43749,590 @@ cp_parser_omp_scan_loop_body (cp_parser *parser)
   braces.require_close (parser);
 }
 
+
+/* This function parses a single level of a loop nest, invoking itself
+   recursively if necessary.
+
+   loop-nest :: for (...) loop-body
+   loop-body :: loop-nest
+	     |  { [intervening-code] loop-body [intervening-code] }
+	     |  final-loop-body
+   intervening-code :: structured-block-sequence
+   final-loop-body :: structured-block
+
+   For a collapsed loop nest, only a single OMP_FOR is built, pulling out
+   all the iterator information from the inner loops into vectors in the
+   parser->omp_for_parse_state structure.
+
+   In the "range for" case, it is transformed into a regular "for" iterator
+   by introducing some temporary variables for the begin/end,
+   as well as bindings of the actual iteration variables which are
+   injected into the body of the loop.
+
+   Initialization code for iterator variables may end up either in the
+   init vector (simple assignments), in omp_for_parse_state->pre_body
+   (decl_exprs for iterators bound in the for statement), or in the
+   scope surrounding this level of loop initialization.
+
+   The scopes of class iterator variables and their finalizers need to
+   be adjusted after parsing so that all of the initialization happens
+   in a scope surrounding all of the intervening and body code.  For
+   this reason we separately store the initialization and body blocks
+   for each level of loops in the omp_for_parse_state structure and
+   reassemble/reorder them in cp_parser_omp_for.  See additional
+   comments there about the use of placeholders, etc.  */
+
+static tree
+cp_parser_omp_loop_nest (cp_parser *parser, bool *if_p)
+{
+  tree decl, cond, incr, init;
+  tree orig_init, real_decl, orig_decl;
+  tree init_block, body_block;
+  tree init_placeholder, body_placeholder;
+  tree init_scope;
+  tree this_pre_body = NULL_TREE;
+  bool moreloops;
+  unsigned char save_in_statement;
+  tree add_private_clause = NULL_TREE;
+  location_t loc;
+  bool is_range_for = false;
+  tree sl = NULL_TREE;
+  struct omp_for_parse_data *omp_for_parse_state
+    = parser->omp_for_parse_state;
+  gcc_assert (omp_for_parse_state);
+  int depth = omp_for_parse_state->depth;
+
+  /* We have already matched the FOR token but not consumed it yet.  */
+  gcc_assert (cp_lexer_next_token_is_keyword (parser->lexer, RID_FOR));
+  loc = cp_lexer_consume_token (parser->lexer)->location;
+
+  /* Forbid break/continue in the loop initializer, condition, and
+     increment expressions.  */
+  save_in_statement = parser->in_statement;
+  parser->in_statement = IN_OMP_BLOCK;
+
+  /* We are not in intervening code now.  */
+  omp_for_parse_state->in_intervening_code = false;
+
+  /* Don't create location wrapper nodes within an OpenMP "for"
+     statement.  */
+  auto_suppress_location_wrappers sentinel;
+
+  matching_parens parens;
+  if (!parens.require_open (parser))
+    return NULL;
+
+  init = orig_init = decl = real_decl = orig_decl = NULL_TREE;
+
+  init_placeholder = build_stmt (input_location, EXPR_STMT,
+				 integer_zero_node);
+  vec_safe_push (omp_for_parse_state->init_placeholderv, init_placeholder);
+
+  /* The init_block acts as a container for this level of loop goo.  */
+  init_block = push_stmt_list ();
+  vec_safe_push (omp_for_parse_state->init_blockv, init_block);
+
+  /* Wrap a scope around this entire level of loop to hold bindings
+     of loop iteration variables.  We can't insert them directly
+     in the containing scope because that would cause their visibility to
+     be incorrect with respect to intervening code after this loop.
+     We will combine the nested init_scopes in postprocessing after the
+     entire loop is parsed.  */
+  init_scope = begin_compound_stmt (0);
+
+  /* Now we need another level of statement list container to capture the
+     initialization (and possible finalization) bits.  In some cases this
+     container may be popped off during initializer parsing to store code in
+     INIT or THIS_PRE_BODY, depending on the form of initialization.  If
+     we have a class iterator we will pop it at the end of parsing this
+     level, so the cleanups are handled correctly.  */
+  sl = push_stmt_list ();
+
+  if (omp_for_parse_state->code != OACC_LOOP && cxx_dialect >= cxx11)
+    {
+      /* Save tokens so that we can put them back.  */
+      cp_lexer_save_tokens (parser->lexer);
+
+      /* Look for ':' that is not nested in () or {}.  */
+      is_range_for
+	= (cp_parser_skip_to_closing_parenthesis_1 (parser,
+						    /*recovering=*/false,
+						    CPP_COLON,
+						    /*consume_paren=*/
+						    false) == -1);
+
+      /* Roll back the tokens we skipped.  */
+      cp_lexer_rollback_tokens (parser->lexer);
+
+      if (is_range_for)
+	{
+	  bool saved_colon_corrects_to_scope_p
+	    = parser->colon_corrects_to_scope_p;
+
+	  /* A colon is used in range-based for.  */
+	  parser->colon_corrects_to_scope_p = false;
+
+	  /* Parse the declaration.  */
+	  cp_parser_simple_declaration (parser,
+					/*function_definition_allowed_p=*/
+					false, &decl);
+	  parser->colon_corrects_to_scope_p
+	    = saved_colon_corrects_to_scope_p;
+
+	  cp_parser_require (parser, CPP_COLON, RT_COLON);
+
+	  init = cp_parser_range_for (parser, NULL_TREE, NULL_TREE, decl,
+				      false, NULL_TREE, false, true);
+
+	  cp_convert_omp_range_for (this_pre_body, sl, decl,
+				    orig_decl, init, orig_init,
+				    cond, incr);
+
+	  if (omp_for_parse_state->ordered_cl)
+	    error_at (OMP_CLAUSE_LOCATION (omp_for_parse_state->ordered_cl),
+		      "%<ordered%> clause with parameter on "
+		      "range-based %<for%> loop");
+
+	  goto parse_close_paren;
+	}
+    }
+
+  add_private_clause
+    = cp_parser_omp_for_loop_init (parser, this_pre_body, sl,
+				   init, orig_init, decl, real_decl);
+
+  cp_parser_require (parser, CPP_SEMICOLON, RT_SEMICOLON);
+
+  /* If the iteration variable was introduced via a declaration in the
+     for statement, DECL points at it.  Otherwise DECL is null and
+     REAL_DECL is a variable previously declared in an outer scope.
+     Make REAL_DECL point at the iteration variable no matter where it
+     was introduced.  */
+  if (decl)
+    real_decl = decl;
+
+  /* Some clauses treat iterator variables specially.  */
+  if (omp_for_parse_state->cclauses != NULL
+      && omp_for_parse_state->cclauses[C_OMP_CLAUSE_SPLIT_PARALLEL] != NULL
+      && real_decl != NULL_TREE
+      && omp_for_parse_state->code != OMP_LOOP)
+    {
+      tree *c;
+      for (c = &(omp_for_parse_state->cclauses[C_OMP_CLAUSE_SPLIT_PARALLEL]);
+	   *c ; )
+	if (OMP_CLAUSE_CODE (*c) == OMP_CLAUSE_FIRSTPRIVATE
+	    && OMP_CLAUSE_DECL (*c) == real_decl)
+	  {
+	    error_at (loc, "iteration variable %qD"
+		      " should not be firstprivate", real_decl);
+	    *c = OMP_CLAUSE_CHAIN (*c);
+	  }
+	else if (OMP_CLAUSE_CODE (*c) == OMP_CLAUSE_LASTPRIVATE
+		 && OMP_CLAUSE_DECL (*c) == real_decl)
+	  {
+	    /* Move lastprivate (decl) clause to OMP_FOR_CLAUSES.  */
+	    tree l = *c;
+	    *c = OMP_CLAUSE_CHAIN (*c);
+	    if (omp_for_parse_state->code == OMP_SIMD)
+	      {
+		OMP_CLAUSE_CHAIN (l)
+		  = omp_for_parse_state->cclauses[C_OMP_CLAUSE_SPLIT_FOR];
+		omp_for_parse_state->cclauses[C_OMP_CLAUSE_SPLIT_FOR] = l;
+	      }
+	    else
+	      {
+		OMP_CLAUSE_CHAIN (l) = omp_for_parse_state->clauses;
+		omp_for_parse_state->clauses = l;
+	      }
+	    add_private_clause = NULL_TREE;
+	  }
+	else
+	  {
+	    if (OMP_CLAUSE_CODE (*c) == OMP_CLAUSE_PRIVATE
+		&& OMP_CLAUSE_DECL (*c) == real_decl)
+	      add_private_clause = NULL_TREE;
+	    c = &OMP_CLAUSE_CHAIN (*c);
+	  }
+    }
+
+  if (add_private_clause)
+    {
+      tree c;
+      for (c = omp_for_parse_state->clauses; c ; c = OMP_CLAUSE_CHAIN (c))
+	{
+	  if ((OMP_CLAUSE_CODE (c) == OMP_CLAUSE_PRIVATE
+	       || OMP_CLAUSE_CODE (c) == OMP_CLAUSE_LASTPRIVATE)
+	      && OMP_CLAUSE_DECL (c) == decl)
+	    break;
+	  else if (OMP_CLAUSE_CODE (c) == OMP_CLAUSE_FIRSTPRIVATE
+		   && OMP_CLAUSE_DECL (c) == decl)
+	    error_at (loc, "iteration variable %qD "
+		      "should not be firstprivate",
+		      decl);
+	  else if ((OMP_CLAUSE_CODE (c) == OMP_CLAUSE_REDUCTION
+		    || OMP_CLAUSE_CODE (c) == OMP_CLAUSE_IN_REDUCTION)
+		   && OMP_CLAUSE_DECL (c) == decl)
+	    error_at (loc, "iteration variable %qD should not be reduction",
+		      decl);
+	}
+      if (c == NULL)
+	{
+	  if ((omp_for_parse_state->code == OMP_SIMD
+	       && omp_for_parse_state->count != 1)
+	      || omp_for_parse_state->code == OMP_LOOP)
+	    c = build_omp_clause (loc, OMP_CLAUSE_LASTPRIVATE);
+	  else if (omp_for_parse_state->code != OMP_SIMD)
+	    c = build_omp_clause (loc, OMP_CLAUSE_PRIVATE);
+	  else
+	    c = build_omp_clause (loc, OMP_CLAUSE_LINEAR);
+	  OMP_CLAUSE_DECL (c) = add_private_clause;
+	  c = finish_omp_clauses (c, C_ORT_OMP);
+	  if (c)
+	    {
+	      OMP_CLAUSE_CHAIN (c) = omp_for_parse_state->clauses;
+	      omp_for_parse_state->clauses = c;
+	      /* For linear, signal that we need to fill up
+		 the so far unknown linear step.  */
+	      if (OMP_CLAUSE_CODE (c) == OMP_CLAUSE_LINEAR)
+		OMP_CLAUSE_LINEAR_STEP (c) = NULL_TREE;
+	    }
+	}
+    }
+
+  cond = NULL;
+  if (cp_lexer_next_token_is_not (parser->lexer, CPP_SEMICOLON))
+    cond = cp_parser_omp_for_cond (parser, decl, omp_for_parse_state->code);
+  cp_parser_require (parser, CPP_SEMICOLON, RT_SEMICOLON);
+
+  incr = NULL;
+  if (cp_lexer_next_token_is_not (parser->lexer, CPP_CLOSE_PAREN))
+    {
+      /* If decl is an iterator, preserve the operator on decl
+	 until finish_omp_for.  */
+      if (real_decl
+	  && ((processing_template_decl
+	       && (TREE_TYPE (real_decl) == NULL_TREE
+		   || !INDIRECT_TYPE_P (TREE_TYPE (real_decl))))
+	      || CLASS_TYPE_P (TREE_TYPE (real_decl))))
+	incr = cp_parser_omp_for_incr (parser, real_decl);
+      else
+	incr = cp_parser_expression (parser);
+      protected_set_expr_location_if_unset (incr, input_location);
+    }
+
+ parse_close_paren:
+  if (!parens.require_close (parser))
+    cp_parser_skip_to_closing_parenthesis (parser, /*recovering=*/true,
+					   /*or_comma=*/false,
+					   /*consume_paren=*/true);
+
+  /* We've parsed all the for (...) stuff now.  Store the bits.  */
+  TREE_VEC_ELT (omp_for_parse_state->declv, depth) = decl;
+  TREE_VEC_ELT (omp_for_parse_state->initv, depth) = init;
+  TREE_VEC_ELT (omp_for_parse_state->condv, depth) = cond;
+  TREE_VEC_ELT (omp_for_parse_state->incrv, depth) = incr;
+  if (orig_init)
+    {
+      omp_for_parse_state->orig_inits.safe_grow_cleared (depth + 1, true);
+      omp_for_parse_state->orig_inits[depth] = orig_init;
+    }
+  if (orig_decl)
+    {
+      if (!omp_for_parse_state->orig_declv)
+	omp_for_parse_state->orig_declv
+	  = copy_node (omp_for_parse_state->declv);
+      TREE_VEC_ELT (omp_for_parse_state->orig_declv, depth) = orig_decl;
+    }
+  else if (omp_for_parse_state->orig_declv)
+    TREE_VEC_ELT (omp_for_parse_state->orig_declv, depth) = decl;
+  if (this_pre_body)
+    append_to_statement_list_force (this_pre_body,
+				    &(omp_for_parse_state->pre_body));
+
+  /* Start a nested block for the loop body.  */
+  body_placeholder = build_stmt (input_location, EXPR_STMT,
+				 integer_zero_node);
+  vec_safe_push (omp_for_parse_state->body_placeholderv, body_placeholder);
+  body_block = push_stmt_list ();
+  vec_safe_push (omp_for_parse_state->body_blockv, body_block);
+
+  moreloops = depth < omp_for_parse_state->count - 1;
+  omp_for_parse_state->want_nested_loop = moreloops;
+  if (moreloops && cp_lexer_next_token_is_keyword (parser->lexer, RID_FOR))
+    {
+      omp_for_parse_state->depth++;
+      add_stmt (cp_parser_omp_loop_nest (parser, if_p));
+      omp_for_parse_state->depth--;
+    }
+  else if (moreloops
+	   && cp_lexer_next_token_is (parser->lexer, CPP_OPEN_BRACE))
+    {
+      /* This is the open brace in the loop-body grammar production.  Rather
+	 than trying to special-case braces, just parse it as a compound
+	 statement and handle the nested loop-body case there.  Note that
+	 when we see a further open brace inside the compound statement
+	 loop-body, we don't know whether it is the start of intervening
+	 code that is a compound statement, or a level of braces
+	 surrounding a nested loop-body.  Use the WANT_NESTED_LOOP state
+	 bit to ensure we have only one nested loop at each level.  */
+
+      omp_for_parse_state->in_intervening_code = true;
+      cp_parser_compound_statement (parser, NULL, BCS_NORMAL, false);
+      omp_for_parse_state->in_intervening_code = false;
+
+      if (omp_for_parse_state->want_nested_loop)
+	{
+	  /* We have already parsed the whole loop body and not found a
+	     nested loop.  */
+	  error_at (omp_for_parse_state->for_loc,
+		    "not enough nested loops");
+	  omp_for_parse_state->fail = true;
+	}
+      if_p = NULL;
+    }
+  else
+    {
+      /* This is the final-loop-body case in the grammar: we have something
+	 that is not a FOR and not an open brace.  */
+      if (moreloops)
+	{
+	  /* If we were expecting a nested loop, give an error and mark
+	     that parsing has failed, and try to recover by parsing the
+	     body as regular code without further collapsing.  */
+	  error_at (omp_for_parse_state->for_loc,
+		    "not enough nested loops");
+	  omp_for_parse_state->fail = true;
+	}
+      parser->in_statement = IN_OMP_FOR;
+
+      /* Generate the parts of range for that belong in the loop body,
+	 to be executed on every iteration.  This includes setting the
+	 user-declared decomposition variables from the compiler-generated
+	 temporaries that are the real iteration variables for OMP_FOR.
+	 FIXME:  Not sure if this is correct with respect to visibility
+	 of the variables from intervening code.  However, putting this
+	 code in each level of loop instead of all around the innermost
+	 body also makes the decomposition variables visible to the
+	 inner for init/bound/step exressions, which is not supposed to
+	 happen and causes test failures.  */
+      if (omp_for_parse_state->orig_declv)
+	for (int i = 0; i < omp_for_parse_state->count; i++)
+	  {
+	    tree o = TREE_VEC_ELT (omp_for_parse_state->orig_declv, i);
+	    tree d = TREE_VEC_ELT (omp_for_parse_state->declv, i);
+	    if (o != d)
+	      cp_finish_omp_range_for (o, d);
+	  }
+
+      /* Now parse the final-loop-body for the innermost loop.  */
+      parser->omp_for_parse_state = NULL;
+      if (omp_for_parse_state->inscan)
+	cp_parser_omp_scan_loop_body (parser);
+      else
+	cp_parser_statement (parser, NULL_TREE, false, if_p);
+      parser->omp_for_parse_state = omp_for_parse_state;
+    }
+  parser->in_statement = save_in_statement;
+  omp_for_parse_state->want_nested_loop = false;
+  omp_for_parse_state->in_intervening_code = true;
+
+  /* Pop and remember the body block.  Add the body placeholder
+     to the surrounding statement list instead.  This is just a unique
+     token that will be replaced when we reassemble the generated
+     code for the entire omp for statement.  */
+  body_block = pop_stmt_list (body_block);
+  omp_for_parse_state->body_blockv[depth] = body_block;
+  add_stmt (body_placeholder);
+
+  /* Pop and remember the init block.  */
+  if (sl)
+    add_stmt (pop_stmt_list (sl));
+  finish_compound_stmt (init_scope);
+  init_block = pop_stmt_list (init_block);
+  omp_for_parse_state->init_blockv[depth] = init_block;
+
+  /* Return the init placeholder rather than the remembered init block.
+     Again, this is just a unique cookie that will be used to reassemble
+     code pieces when the entire omp for statement has been parsed.  */
+  return init_placeholder;
+}
+
+/* Worker for find_structured_blocks.  *TP points to a STATEMENT_LIST
+   and ITER is the element that is or contains a nested loop.  This
+   function moves the statements before and after ITER into
+   OMP_STRUCTURED_BLOCKs and modifies *TP.  */
+static void
+insert_structured_blocks (tree *tp, tree_stmt_iterator iter)
+{
+  tree sl = push_stmt_list ();
+  for (tree_stmt_iterator i = tsi_start (*tp); !tsi_end_p (i); )
+    if (i == iter)
+      {
+	sl = pop_stmt_list (sl);
+	if (TREE_CODE (sl) != STATEMENT_LIST || !tsi_end_p (tsi_start (sl)))
+	  tsi_link_before (&i,
+			   build1 (OMP_STRUCTURED_BLOCK, void_type_node, sl),
+			   TSI_SAME_STMT);
+	i++;
+	sl = push_stmt_list ();
+      }
+    else
+      {
+	tree s = tsi_stmt (i);
+	tsi_delink (&i);  /* Advances i to next statement.  */
+	add_stmt (s);
+      }
+  sl = pop_stmt_list (sl);
+  if (TREE_CODE (sl) != STATEMENT_LIST || !tsi_end_p (tsi_start (sl)))
+    tsi_link_after (&iter,
+		    build1 (OMP_STRUCTURED_BLOCK, void_type_node, sl),
+		    TSI_SAME_STMT);
+}
+
+/* Helper to find and mark structured blocks in intervening code for a
+   single loop level with markers for later error checking.  *TP is the
+   piece of code to be marked and INNER is the inner loop placeholder.
+   Returns true if INNER was found (recursively) in *TP.  */
+static bool
+find_structured_blocks (tree *tp, tree inner)
+{
+  if (*tp == inner)
+    return true;
+  else if (TREE_CODE (*tp) == BIND_EXPR)
+    return find_structured_blocks (&(BIND_EXPR_BODY (*tp)), inner);
+  else if (TREE_CODE (*tp) == STATEMENT_LIST)
+    {
+      for (tree_stmt_iterator i = tsi_start (*tp); !tsi_end_p (i); ++i)
+	{
+	  tree *p = tsi_stmt_ptr (i);
+	  /* The normal case is that there is no intervening code and we
+	     do not have to insert any OMP_STRUCTURED_BLOCK markers.  */
+	  if (find_structured_blocks (p, inner))
+	    {
+	      if (!(i == tsi_start (*tp) && i == tsi_last (*tp)))
+		insert_structured_blocks (tp, i);
+	      return true;
+	    }
+	}
+      return false;
+    }
+  else if (TREE_CODE (*tp) == TRY_FINALLY_EXPR)
+    return find_structured_blocks (&(TREE_OPERAND (*tp, 0)), inner);
+  else if (TREE_CODE (*tp) == CLEANUP_STMT)
+    return find_structured_blocks (&(CLEANUP_BODY (*tp)), inner);
+  else
+    return false;
+}
+
+/* Helpers used for relinking tree structures: In tree rooted at
+   CONTEXT, replace ORIG with REPLACEMENT.  If FLATTEN is true, try to combine
+   nested BIND_EXPRs.  Gives an assertion if it fails to find ORIG.  */
+
+struct sit_data {
+  tree orig;
+  tree repl;
+  bool flatten;
+};
+
+static tree
+substitute_in_tree_walker (tree *tp, int *walk_subtrees ATTRIBUTE_UNUSED,
+			   void *dp)
+{
+  struct sit_data *sit = (struct sit_data *)dp;
+  if (*tp == sit->orig)
+    {
+      *tp = sit->repl;
+      return *tp;
+    }
+  /* Remove redundant BIND_EXPRs with no bindings even when not specifically
+     trying to flatten.  */
+  else if (TREE_CODE (*tp) == BIND_EXPR
+	   && BIND_EXPR_BODY (*tp) == sit->orig
+	   && !BIND_EXPR_VARS (*tp)
+	   && (sit->flatten || TREE_CODE (sit->repl) == BIND_EXPR))
+    {
+      *tp = sit->repl;
+      return *tp;
+    }
+  else if (sit->flatten
+	   && TREE_CODE (*tp) == BIND_EXPR
+	   && TREE_CODE (sit->repl) == BIND_EXPR)
+    {
+      if (BIND_EXPR_BODY (*tp) == sit->orig)
+	{
+	  /* Merge binding lists for two directly nested BIND_EXPRs,
+	     keeping the outer one.  */
+	  BIND_EXPR_VARS (*tp) = chainon (BIND_EXPR_VARS (*tp),
+					  BIND_EXPR_VARS (sit->repl));
+	  BIND_EXPR_BODY (*tp) = BIND_EXPR_BODY (sit->repl);
+	  return *tp;
+	}
+      else if (TREE_CODE (BIND_EXPR_BODY (*tp)) == STATEMENT_LIST)
+	/* There might be a statement list containing cleanup_points
+	   etc between the two levels of BIND_EXPR.  We can still merge
+	   them, again keeping the outer BIND_EXPR.  */
+	for (tree_stmt_iterator i = tsi_start (BIND_EXPR_BODY (*tp));
+	     !tsi_end_p (i); ++i)
+	  {
+	    tree *p = tsi_stmt_ptr (i);
+	    if (*p == sit->orig)
+	      {
+		BIND_EXPR_VARS (*tp) = chainon (BIND_EXPR_VARS (*tp),
+						BIND_EXPR_VARS (sit->repl));
+		*p = BIND_EXPR_BODY (sit->repl);
+		return *tp;
+	      }
+	  }
+    }
+  return NULL;
+}
+
+static void
+substitute_in_tree (tree *context, tree orig, tree repl, bool flatten)
+{
+  struct sit_data data;
+
+  gcc_assert (*context && orig && repl);
+  if (TREE_CODE (repl) == BIND_EXPR && !BIND_EXPR_VARS (repl))
+    repl = BIND_EXPR_BODY (repl);
+  data.orig = orig;
+  data.repl = repl;
+  data.flatten = flatten;
+
+  tree result = cp_walk_tree (context, substitute_in_tree_walker,
+			      (void *)&data, NULL);
+  gcc_assert (result != NULL_TREE);
+}
+
+/* Walker to patch up the BLOCK_NODE hierarchy after the above surgery.
+   *DP is is the parent block.  */
+
+static tree
+fixup_blocks_walker (tree *tp, int *walk_subtrees, void *dp)
+{
+  tree superblock = *(tree *)dp;
+
+  /* BIND_EXPR_BLOCK may be null if the expression is not a
+     full-expression; if there's no block, no patching is necessary
+     for this node.  */
+  if (TREE_CODE (*tp) == BIND_EXPR && BIND_EXPR_BLOCK (*tp))
+    {
+      tree block = BIND_EXPR_BLOCK (*tp);
+      if (superblock)
+	{
+	  BLOCK_SUPERCONTEXT (block) = superblock;
+	  BLOCK_CHAIN (block) = BLOCK_SUBBLOCKS (superblock);
+	  BLOCK_SUBBLOCKS (superblock) = block;
+	}
+      BLOCK_SUBBLOCKS (block) = NULL_TREE;
+      cp_walk_tree (&BIND_EXPR_BODY (*tp), fixup_blocks_walker,
+		    (void *)&block, NULL);
+      *walk_subtrees = 0;
+    }
+
+  return NULL;
+}
+
 /* Parse the restricted form of the for statement allowed by OpenMP.  */
 
 static tree
@@ -49305,29 +49887,31 @@ cp_parser_pragma_ivdep (cp_parser *parser, cp_token *pragma_tok)
 
 /* Parse a pragma GCC unroll.  */
 
-static unsigned short
+static tree
 cp_parser_pragma_unroll (cp_parser *parser, cp_token *pragma_tok)
 {
   location_t location = cp_lexer_peek_token (parser->lexer)->location;
-  tree expr = cp_parser_constant_expression (parser);
-  unsigned short unroll;
-  expr = maybe_constant_value (expr);
+  tree unroll = cp_parser_constant_expression (parser);
+  unroll = fold_non_dependent_expr (unroll);
   HOST_WIDE_INT lunroll = 0;
-  if (!INTEGRAL_TYPE_P (TREE_TYPE (expr))
-      || TREE_CODE (expr) != INTEGER_CST
-      || (lunroll = tree_to_shwi (expr)) < 0
-      || lunroll >= USHRT_MAX)
+  if (type_dependent_expression_p (unroll))
+    ;
+  else if (!INTEGRAL_TYPE_P (TREE_TYPE (unroll))
+	   || (!value_dependent_expression_p (unroll)
+	       && (!tree_fits_shwi_p (unroll)
+		   || (lunroll = tree_to_shwi (unroll)) < 0
+		   || lunroll >= USHRT_MAX)))
     {
       error_at (location, "%<#pragma GCC unroll%> requires an"
 		" assignment-expression that evaluates to a non-negative"
 		" integral constant less than %u", USHRT_MAX);
-      unroll = 0;
+      unroll = NULL_TREE;
     }
-  else
+  else if (TREE_CODE (unroll) == INTEGER_CST)
     {
-      unroll = (unsigned short)lunroll;
-      if (unroll == 0)
-	unroll = 1;
+      unroll = fold_convert (integer_type_node, unroll);
+      if (integer_zerop (unroll))
+	unroll = integer_one_node;
     }
   cp_parser_skip_to_pragma_eol (parser, pragma_tok);
   return unroll;
@@ -49651,7 +50235,7 @@ cp_parser_pragma (cp_parser *parser, enum pragma_context context, bool *if_p)
     case PRAGMA_NOVECTOR:
       {
 	bool ivdep;
-	unsigned short unroll = 0;
+	tree unroll = NULL_TREE;
 	bool novector = false;
 	const char *pragma_str;
 
