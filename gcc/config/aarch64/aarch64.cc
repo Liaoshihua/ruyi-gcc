@@ -2803,7 +2803,42 @@ TARGET_GNU_ATTRIBUTES (aarch64_attribute_table,
   { "Advanced SIMD type", 1, 1, false, true,  false, true,  NULL, NULL },
   { "SVE type",		  3, 3, false, true,  false, true,  NULL, NULL },
   { "SVE sizeless type",  0, 0, false, true,  false, true,  NULL, NULL }
-});
+};
+
+static const scoped_attribute_specs aarch64_gnu_attribute_table =
+{
+  "gnu", { aarch64_gnu_attributes }
+};
+
+static const attribute_spec aarch64_arm_attributes[] =
+{
+  { "streaming",	  0, 0, false, true,  true,  true,
+			  NULL, attr_streaming_exclusions },
+  { "streaming_compatible", 0, 0, false, true,  true,  true,
+			  NULL, attr_streaming_exclusions },
+  { "locally_streaming",  0, 0, true, false, false, false, NULL, NULL },
+  { "new",		  1, -1, true, false, false, false,
+			  handle_arm_new, NULL },
+  { "preserves",	  1, -1, false, true,  true,  true,
+			  handle_arm_shared, NULL },
+  { "in",		  1, -1, false, true,  true,  true,
+			  handle_arm_shared, NULL },
+  { "out",		  1, -1, false, true,  true,  true,
+			  handle_arm_shared, NULL },
+  { "inout",		  1, -1, false, true,  true,  true,
+			  handle_arm_shared, NULL }
+};
+
+static const scoped_attribute_specs aarch64_arm_attribute_table =
+{
+  "arm", { aarch64_arm_attributes }
+};
+
+static const scoped_attribute_specs *const aarch64_attribute_table[] =
+{
+  &aarch64_gnu_attribute_table,
+  &aarch64_arm_attribute_table
+};
 
 typedef enum aarch64_cond_code
 {
