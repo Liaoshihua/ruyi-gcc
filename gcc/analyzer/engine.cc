@@ -5988,7 +5988,7 @@ dump_analyzer_json (const supergraph &sg,
   toplev_obj->set ("egraph", eg.to_json ());
 
   pretty_printer pp;
-  toplev_obj->print (&pp);
+  toplev_obj->print (&pp, flag_diagnostics_json_formatting);
   pp_formatted_text (&pp);
 
   delete toplev_obj;
