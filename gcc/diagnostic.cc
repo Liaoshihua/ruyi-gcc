@@ -2416,7 +2416,8 @@ diagnostic_text_output_format::on_diagram (const diagnostic_diagram &diagram)
 void
 diagnostic_output_format_init (diagnostic_context *context,
 			       const char *base_file_name,
-			       enum diagnostics_output_format format)
+			       enum diagnostics_output_format format,
+			       bool json_formatting)
 {
   switch (format)
     {
@@ -2427,19 +2428,25 @@ diagnostic_output_format_init (diagnostic_context *context,
       break;
 
     case DIAGNOSTICS_OUTPUT_FORMAT_JSON_STDERR:
-      diagnostic_output_format_init_json_stderr (context);
+      diagnostic_output_format_init_json_stderr (context,
+						 json_formatting);
       break;
 
     case DIAGNOSTICS_OUTPUT_FORMAT_JSON_FILE:
-      diagnostic_output_format_init_json_file (context, base_file_name);
+      diagnostic_output_format_init_json_file (context,
+					       json_formatting,
+					       base_file_name);
       break;
 
     case DIAGNOSTICS_OUTPUT_FORMAT_SARIF_STDERR:
-      diagnostic_output_format_init_sarif_stderr (context);
+      diagnostic_output_format_init_sarif_stderr (context,
+						  json_formatting);
       break;
 
     case DIAGNOSTICS_OUTPUT_FORMAT_SARIF_FILE:
-      diagnostic_output_format_init_sarif_file (context, base_file_name);
+      diagnostic_output_format_init_sarif_file (context,
+						json_formatting,
+						base_file_name);
       break;
     }
 }
