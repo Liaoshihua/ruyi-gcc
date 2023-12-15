@@ -24313,6 +24313,26 @@ ix86_get_excess_precision (enum excess_precision_type type)
   return FLT_EVAL_METHOD_UNPREDICTABLE;
 }
 
+/* Return true if _BitInt(N) is supported and fill its details into *INFO.  */
+bool
+ix86_bitint_type_info (int n, struct bitint_info *info)
+{
+  if (!TARGET_64BIT)
+    return false;
+  if (n <= 8)
+    info->limb_mode = QImode;
+  else if (n <= 16)
+    info->limb_mode = HImode;
+  else if (n <= 32)
+    info->limb_mode = SImode;
+  else
+    info->limb_mode = DImode;
+  info->abi_limb_mode = info->limb_mode;
+  info->big_endian = false;
+  info->extended = false;
+  return true;
+}
+
 /* Implement PUSH_ROUNDING.  On 386, we have pushw instruction that
    decrements by exactly 2 no matter what the position was, there is no pushb.
 
