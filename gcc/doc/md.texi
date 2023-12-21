@@ -7257,6 +7257,7 @@ operand 0, otherwise (operand 2 + operand 3) is moved.
 @cindex @code{cond_smax@var{mode}} instruction pattern
 @cindex @code{cond_umin@var{mode}} instruction pattern
 @cindex @code{cond_umax@var{mode}} instruction pattern
+@cindex @code{cond_copysign@var{mode}} instruction pattern
 @cindex @code{cond_fmin@var{mode}} instruction pattern
 @cindex @code{cond_fmax@var{mode}} instruction pattern
 @cindex @code{cond_ashl@var{mode}} instruction pattern
@@ -7276,6 +7277,7 @@ operand 0, otherwise (operand 2 + operand 3) is moved.
 @itemx @samp{cond_smax@var{mode}}
 @itemx @samp{cond_umin@var{mode}}
 @itemx @samp{cond_umax@var{mode}}
+@itemx @samp{cond_copysign@var{mode}}
 @itemx @samp{cond_fmin@var{mode}}
 @itemx @samp{cond_fmax@var{mode}}
 @itemx @samp{cond_ashl@var{mode}}
@@ -7313,6 +7315,8 @@ form of @samp{@var{op}@var{mode}3}.  As an exception, the vector forms
 of shifts correspond to patterns like @code{vashl@var{mode}3} rather
 than patterns like @code{ashl@var{mode}3}.
 
+@samp{cond_copysign@var{mode}} is only defined for floating point modes.
+
 @cindex @code{cond_fma@var{mode}} instruction pattern
 @cindex @code{cond_fms@var{mode}} instruction pattern
 @cindex @code{cond_fnma@var{mode}} instruction pattern
@@ -7344,6 +7348,7 @@ for (i = 0; i < GET_MODE_NUNITS (@var{m}); i++)
 @cindex @code{cond_len_smax@var{mode}} instruction pattern
 @cindex @code{cond_len_umin@var{mode}} instruction pattern
 @cindex @code{cond_len_umax@var{mode}} instruction pattern
+@cindex @code{cond_len_copysign@var{mode}} instruction pattern
 @cindex @code{cond_len_fmin@var{mode}} instruction pattern
 @cindex @code{cond_len_fmax@var{mode}} instruction pattern
 @cindex @code{cond_len_ashl@var{mode}} instruction pattern
@@ -7363,6 +7368,7 @@ for (i = 0; i < GET_MODE_NUNITS (@var{m}); i++)
 @itemx @samp{cond_len_smax@var{mode}}
 @itemx @samp{cond_len_umin@var{mode}}
 @itemx @samp{cond_len_umax@var{mode}}
+@itemx @samp{cond_len_copysign@var{mode}}
 @itemx @samp{cond_len_fmin@var{mode}}
 @itemx @samp{cond_len_fmax@var{mode}}
 @itemx @samp{cond_len_ashl@var{mode}}
@@ -7388,10 +7394,12 @@ integer if @var{m} is scalar, otherwise it has the mode returned by
 @code{TARGET_VECTORIZE_GET_MASK_MODE}.  Operand 5 has whichever
 integer mode the target prefers.
 
-@samp{cond_@var{op}@var{mode}} generally corresponds to a conditional
+@samp{cond_len_@var{op}@var{mode}} generally corresponds to a conditional
 form of @samp{@var{op}@var{mode}3}.  As an exception, the vector forms
 of shifts correspond to patterns like @code{vashl@var{mode}3} rather
 than patterns like @code{ashl@var{mode}3}.
+
+@samp{cond_len_copysign@var{mode}} is only defined for floating point modes.
 
 @cindex @code{cond_len_fma@var{mode}} instruction pattern
 @cindex @code{cond_len_fms@var{mode}} instruction pattern
