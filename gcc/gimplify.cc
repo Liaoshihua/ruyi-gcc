@@ -3343,6 +3343,9 @@ recalculate_side_effects (tree t)
       return;
 
     default:
+      if (code == SSA_NAME)
+	/* No side-effects.  */
+	return;
       gcc_unreachable ();
    }
 }
