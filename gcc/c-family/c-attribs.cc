@@ -3141,13 +3141,14 @@ handle_copy_attribute (tree *node, tree name, tree args,
   if (ref == error_mark_node)
     return NULL_TREE;
 
+  location_t loc = input_location;
+  if (DECL_P (decl))
+    loc = DECL_SOURCE_LOCATION (decl);
   if (TREE_CODE (ref) == STRING_CST)
     {
       /* Explicitly handle this case since using a string literal
 	 as an argument is a likely mistake.  */
-      error_at (DECL_SOURCE_LOCATION (decl),
-		"%qE attribute argument cannot be a string",
-		name);
+      error_at (loc, "%qE attribute argument cannot be a string", name);
       return NULL_TREE;
     }
 
@@ -3158,10 +3159,8 @@ handle_copy_attribute (tree *node, tree name, tree args,
       /* Similar to the string case, since some function attributes
 	 accept literal numbers as arguments (e.g., alloc_size or
 	 nonnull) using one here is a likely mistake.  */
-      error_at (DECL_SOURCE_LOCATION (decl),
-		"%qE attribute argument cannot be a constant arithmetic "
-		"expression",
-		name);
+      error_at (loc, "%qE attribute argument cannot be a constant arithmetic "
+		"expression", name);
       return NULL_TREE;
     }
 
@@ -3169,12 +3168,11 @@ handle_copy_attribute (tree *node, tree name, tree args,
     {
       /* Another possible mistake (but indirect self-references aren't
 	 and diagnosed and shouldn't be).  */
-      if (warning_at (DECL_SOURCE_LOCATION (decl), OPT_Wattributes,
+      if (warning_at (loc, OPT_Wattributes,
 		      "%qE attribute ignored on a redeclaration "
-		      "of the referenced symbol",
-		      name))
-	inform (DECL_SOURCE_LOCATION (node[1]),
-		"previous declaration here");
+		      "of the referenced symbol", name)
+	  && DECL_P (node[1]))
+	inform (DECL_SOURCE_LOCATION (node[1]), "previous declaration here");
       return NULL_TREE;
     }
 
@@ -3194,7 +3192,8 @@ handle_copy_attribute (tree *node, tree name, tree args,
 	ref = TREE_OPERAND (ref, 1);
       else
 	break;
-    } while (!DECL_P (ref));
+    }
+  while (!DECL_P (ref));
 
   /* For object pointer expressions, consider those to be requests
      to copy from their type, such as in:
@@ -3226,8 +3225,7 @@ handle_copy_attribute (tree *node, tree name, tree args,
 	     to a variable, or variable attributes to a function.  */
 	  if (warning (OPT_Wattributes,
 		       "%qE attribute ignored on a declaration of "
-		       "a different kind than referenced symbol",
-		       name)
+		       "a different kind than referenced symbol", name)
 	      && DECL_P (ref))
 	    inform (DECL_SOURCE_LOCATION (ref),
 		    "symbol %qD referenced by %qD declared here", ref, decl);
@@ -3277,9 +3275,7 @@ handle_copy_attribute (tree *node, tree name, tree args,
     }
   else if (!TYPE_P (decl))
     {
-      error_at (DECL_SOURCE_LOCATION (decl),
-		"%qE attribute must apply to a declaration",
-		name);
+      error_at (loc, "%qE attribute must apply to a declaration", name);
       return NULL_TREE;
     }
 
