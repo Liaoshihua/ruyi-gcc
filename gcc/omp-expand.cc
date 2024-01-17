@@ -4074,7 +4074,7 @@ expand_omp_for_generic (struct omp_region *region,
 
   /* See if we need to bias by LLONG_MIN.  */
   if (fd->iter_type == long_long_unsigned_type_node
-      && TREE_CODE (type) == INTEGER_TYPE
+      && (TREE_CODE (type) == INTEGER_TYPE || TREE_CODE (type) == BITINT_TYPE)
       && !TYPE_UNSIGNED (type)
       && fd->ordered == 0)
     {
@@ -7190,7 +7190,7 @@ expand_omp_taskloop_for_outer (struct omp_region *region,
 
   /* See if we need to bias by LLONG_MIN.  */
   if (fd->iter_type == long_long_unsigned_type_node
-      && TREE_CODE (type) == INTEGER_TYPE
+      && (TREE_CODE (type) == INTEGER_TYPE || TREE_CODE (type) == BITINT_TYPE)
       && !TYPE_UNSIGNED (type))
     {
       tree n1, n2;
@@ -7351,7 +7351,7 @@ expand_omp_taskloop_for_inner (struct omp_region *region,
 
   /* See if we need to bias by LLONG_MIN.  */
   if (fd->iter_type == long_long_unsigned_type_node
-      && TREE_CODE (type) == INTEGER_TYPE
+      && (TREE_CODE (type) == INTEGER_TYPE || TREE_CODE (type) == BITINT_TYPE)
       && !TYPE_UNSIGNED (type))
     {
       tree n1, n2;
