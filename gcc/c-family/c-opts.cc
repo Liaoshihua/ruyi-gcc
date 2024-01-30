@@ -1139,6 +1139,16 @@ c_common_post_options (const char **pfilename)
   if (cxx_dialect >= cxx20 || flag_concepts_ts)
     flag_concepts = 1;
 
+  /* -fconcepts-ts will be removed in GCC 15.  */
+  if (flag_concepts_ts)
+    inform (input_location, "%<-fconcepts-ts%> is deprecated and will be "
+	    "removed in GCC 15; please convert your code to C++20 concepts");
+
+  /* -fimmediate-escalation has no effect when immediate functions are not
+     supported.  */
+  if (flag_immediate_escalation && cxx_dialect < cxx20)
+    flag_immediate_escalation = 0;
+
   if (num_in_fnames > 1)
     error ("too many filenames given; type %<%s %s%> for usage",
 	   progname, "--help");
