@@ -2407,8 +2407,7 @@ read_specs (const char *filename, bool main_p, bool user_p)
 	      if (*p1++ != '<' || p[-2] != '>')
 		fatal_error (input_location,
 			     "specs %%include syntax malformed after "
-			     "%ld characters",
-			     (long) (p1 - buffer + 1));
+			     "%td characters", p1 - buffer + 1);
 
 	      p[-2] = '\0';
 	      new_filename = find_a_file (&startfile_prefixes, p1, R_OK, true);
@@ -2428,8 +2427,7 @@ read_specs (const char *filename, bool main_p, bool user_p)
 	      if (*p1++ != '<' || p[-2] != '>')
 		fatal_error (input_location,
 			     "specs %%include syntax malformed after "
-			     "%ld characters",
-			     (long) (p1 - buffer + 1));
+			     "%td characters", p1 - buffer + 1);
 
 	      p[-2] = '\0';
 	      new_filename = find_a_file (&startfile_prefixes, p1, R_OK, true);
@@ -2455,8 +2453,7 @@ read_specs (const char *filename, bool main_p, bool user_p)
 	      if (! ISALPHA ((unsigned char) *p1))
 		fatal_error (input_location,
 			     "specs %%rename syntax malformed after "
-			     "%ld characters",
-			     (long) (p1 - buffer));
+			     "%td characters", p1 - buffer);
 
 	      p2 = p1;
 	      while (*p2 && !ISSPACE ((unsigned char) *p2))
@@ -2465,8 +2462,7 @@ read_specs (const char *filename, bool main_p, bool user_p)
 	      if (*p2 != ' ' && *p2 != '\t')
 		fatal_error (input_location,
 			     "specs %%rename syntax malformed after "
-			     "%ld characters",
-			     (long) (p2 - buffer));
+			     "%td characters", p2 - buffer);
 
 	      name_len = p2 - p1;
 	      *p2++ = '\0';
@@ -2476,8 +2472,7 @@ read_specs (const char *filename, bool main_p, bool user_p)
 	      if (! ISALPHA ((unsigned char) *p2))
 		fatal_error (input_location,
 			     "specs %%rename syntax malformed after "
-			     "%ld characters",
-			     (long) (p2 - buffer));
+			     "%td characters", p2 - buffer);
 
 	      /* Get new spec name.  */
 	      p3 = p2;
@@ -2487,8 +2482,7 @@ read_specs (const char *filename, bool main_p, bool user_p)
 	      if (p3 != p - 1)
 		fatal_error (input_location,
 			     "specs %%rename syntax malformed after "
-			     "%ld characters",
-			     (long) (p3 - buffer));
+			     "%td characters", p3 - buffer);
 	      *p3 = '\0';
 
 	      for (sl = specs; sl; sl = sl->next)
@@ -2527,8 +2521,8 @@ read_specs (const char *filename, bool main_p, bool user_p)
 	    }
 	  else
 	    fatal_error (input_location,
-			 "specs unknown %% command after %ld characters",
-			 (long) (p1 - buffer));
+			 "specs unknown %% command after %td characters",
+			 p1 - buffer);
 	}
 
       /* Find the colon that should end the suffix.  */
@@ -2539,8 +2533,8 @@ read_specs (const char *filename, bool main_p, bool user_p)
       /* The colon shouldn't be missing.  */
       if (*p1 != ':')
 	fatal_error (input_location,
-		     "specs file malformed after %ld characters",
-		     (long) (p1 - buffer));
+		     "specs file malformed after %td characters",
+		     p1 - buffer);
 
       /* Skip back over trailing whitespace.  */
       p2 = p1;
@@ -2553,8 +2547,8 @@ read_specs (const char *filename, bool main_p, bool user_p)
       p = skip_whitespace (p1 + 1);
       if (p[1] == 0)
 	fatal_error (input_location,
-		     "specs file malformed after %ld characters",
-		     (long) (p - buffer));
+		     "specs file malformed after %td characters",
+		     p - buffer);
 
       p1 = p;
       /* Find next blank line or end of string.  */
