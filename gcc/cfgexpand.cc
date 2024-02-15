@@ -3674,7 +3674,7 @@ expand_asm_stmt (gasm *stmt)
 		  copy = get_insns ();
 		  end_sequence ();
 		}
-	      insert_insn_on_edge (copy, e);
+	      prepend_insn_to_edge (copy, e);
 	    }
 	}
     }
