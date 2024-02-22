@@ -5432,8 +5432,7 @@ c_parser_balanced_token_sequence (c_parser *parser)
    indicates whether this relaxation is in effect.  */
 
 static tree
-c_parser_std_attribute (c_parser *parser, bool for_tm,
-			bool loose_scope_p = false)
+c_parser_std_attribute (c_parser *parser, bool for_tm)
 {
   c_token *token = c_parser_peek_token (parser);
   tree ns, name, attribute;
@@ -5447,8 +5446,8 @@ c_parser_std_attribute (c_parser *parser, bool for_tm,
   name = canonicalize_attr_name (token->value);
   c_parser_consume_token (parser);
   if (c_parser_next_token_is (parser, CPP_SCOPE)
-      || (loose_scope_p
-	  && c_parser_next_token_is (parser, CPP_COLON)
+      || (c_parser_next_token_is (parser, CPP_COLON)
+	  && (c_parser_peek_token (parser)->flags & COLON_SCOPE) != 0
 	  && c_parser_peek_2nd_token (parser)->type == CPP_COLON))
     {
       ns = name;
@@ -5526,8 +5525,7 @@ c_parser_std_attribute (c_parser *parser, bool for_tm,
 }
 
 static tree
-c_parser_std_attribute_list (c_parser *parser, bool for_tm,
-			     bool loose_scope_p = false)
+c_parser_std_attribute_list (c_parser *parser, bool for_tm)
 {
   tree attributes = NULL_TREE;
   while (true)
@@ -5540,7 +5538,7 @@ c_parser_std_attribute_list (c_parser *parser, bool for_tm,
 	  c_parser_consume_token (parser);
 	  continue;
 	}
-      tree attribute = c_parser_std_attribute (parser, for_tm, loose_scope_p);
+      tree attribute = c_parser_std_attribute (parser, for_tm);
       if (attribute != error_mark_node)
 	{
 	  TREE_CHAIN (attribute) = attributes;
@@ -5568,7 +5566,7 @@ c_parser_std_attribute_specifier (c_parser *parser, bool for_tm)
     {
       auto ext = disable_extension_diagnostics ();
       c_parser_consume_token (parser);
-      attributes = c_parser_std_attribute_list (parser, for_tm, true);
+      attributes = c_parser_std_attribute_list (parser, for_tm);
       restore_extension_diagnostics (ext);
     }
   else
