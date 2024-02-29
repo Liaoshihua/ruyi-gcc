@@ -290,11 +290,10 @@ public:
   /* A support class for uniquifying instances of frame_region.  */
   struct key_t
   {
-    key_t (const frame_region *calling_frame, function *fun)
-    : m_calling_frame (calling_frame), m_fun (fun)
+    key_t (const frame_region *calling_frame, const function &fun)
+    : m_calling_frame (calling_frame), m_fun (&fun)
     {
       /* calling_frame can be NULL.  */
-      gcc_assert (fun);
     }
 
     hashval_t hash () const
@@ -307,7 +306,8 @@ public:
 
     bool operator== (const key_t &other) const
     {
-      return (m_calling_frame == other.m_calling_frame && m_fun == other.m_fun);
+      return (m_calling_frame == other.m_calling_frame
+	      && m_fun == other.m_fun);
     }
 
     void mark_deleted () { m_fun = reinterpret_cast<function *> (1); }
@@ -319,12 +319,12 @@ public:
     bool is_empty () const { return m_fun == NULL; }
 
     const frame_region *m_calling_frame;
-    function *m_fun;
+    const function *m_fun;
   };
 
   frame_region (unsigned id, const region *parent,
 		const frame_region *calling_frame,
-		function *fun, int index)
+		const function &fun, int index)
   : space_region (id, parent), m_calling_frame (calling_frame),
     m_fun (fun), m_index (index)
   {}
@@ -341,8 +341,8 @@ public:
 
   /* Accessors.  */
   const frame_region *get_calling_frame () const { return m_calling_frame; }
-  function *get_function () const { return m_fun; }
-  tree get_fndecl () const { return get_function ()->decl; }
+  const function &get_function () const { return m_fun; }
+  tree get_fndecl () const { return get_function ().decl; }
   int get_index () const { return m_index; }
   int get_stack_depth () const { return m_index + 1; }
 
@@ -358,7 +358,7 @@ public:
 
  private:
   const frame_region *m_calling_frame;
-  function *m_fun;
+  const function &m_fun;
   int m_index;
 
   /* The regions for the decls within this frame are managed by this
